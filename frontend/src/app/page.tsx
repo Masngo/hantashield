@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ShieldAlert, Activity, Globe, MapPin, Search, Download, Sparkles, Trash2, ExternalLink, AlertTriangle } from 'lucide-react';
+import { ShieldAlert, Activity, Globe, MapPin, Search, Download, Sparkles, Trash2, ExternalLink, AlertTriangle, Stethoscope, CheckCircle2 } from 'lucide-react';
 
 interface Item {
   id: number;
@@ -22,6 +22,16 @@ interface Alert {
   summary: string;
 }
 
+interface DiagnosisResult {
+  pathogen: string;
+  clinical_assessment: {
+    differential_diagnosis: string[];
+    confirmatory_tests: string[];
+    therapeutics: string[];
+    containment_ppe: string[];
+  };
+}
+
 export default function Home() {
   const [token, setToken] = useState<string | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
@@ -40,8 +50,10 @@ export default function Home() {
   const [locationCoords, setLocationCoords] = useState('-17.8252, 31.0335');
   const [riskScore, setRiskScore] = useState<number>(6.5);
   const [notes, setNotes] = useState('');
-  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  
+  const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>(['Acute Fever', 'Respiratory Distress']);
+  const [diagnosisData, setDiagnosisData] = useState<DiagnosisResult | null>(null);
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
 
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loadingAlerts, setLoadingAlerts] = useState(true);
@@ -115,19 +127,42 @@ export default function Home() {
     setItems([]);
   };
 
-  const simulateAiAgent = () => {
-    setIsAnalyzing(true);
-    setAiAnalysis(null);
-    setTimeout(() => {
-      let threatLevel = riskScore > 7.5 ? 'CRITICAL CONTAINMENT PROTOCOL REQUIRED' : 'STANDARD EPIDEMIOLOGICAL MONITORING';
-      setAiAnalysis(`AI Agent Assessment: Pathogen [${pathogenName}] categorized under vector [${transmissionVector}]. Risk score evaluated at ${riskScore}/10. Recommendation: Establish a 5km quarantine perimeter and deploy real-time PCR field screening. Status: ${threatLevel}.`);
-      setIsAnalyzing(false);
-    }, 1200);
+  const runDiagnosticEngine = async () => {
+    if (!token) return;
+    setIsDiagnosing(true);
+    setDiagnosisData(null);
+
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/diagnose', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          pathogen_name: pathogenName,
+          symptoms: selectedSymptoms,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setDiagnosisData(data);
+      }
+    } catch (err) {
+      console.error('Error running diagnostic engine:', err);
+    } finally {
+      setIsDiagnosing(false);
+    }
   };
 
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token) return;
+
+    let diagnosticSummary = '';
+    if (diagnosisData) {
+      diagnosticSummary = ` \n[Diagnostic Solution - Differential: ${diagnosisData.clinical_assessment.differential_diagnosis.join(', ')} | Therapeutics: ${diagnosisData.clinical_assessment.therapeutics.join('; ')}]`;
+    }
 
     try {
       const res = await fetch('http://127.0.0.1:8000/api/items/', {
@@ -143,13 +178,13 @@ export default function Home() {
           status,
           location_coords: locationCoords,
           risk_score: riskScore,
-          notes: notes + (aiAnalysis ? ` \n[AI Notes: ${aiAnalysis}]` : ''),
+          notes: notes + diagnosticSummary,
         }),
       });
 
       if (res.ok) {
         setNotes('');
-        setAiAnalysis(null);
+        setDiagnosisData(null);
         fetchItems(token, searchQuery, severityFilter);
       }
     } catch (err) {
@@ -331,13 +366,13 @@ export default function Home() {
           </a>
 
           <a
-            href="https://www.ecdc.europa.eu/en/outbreaks-today"
+            href="https://www.ecdc.europa.eu/en/publications-and-data/monitoring/weekly-threats-reports"
             target="_blank"
             rel="noopener noreferrer"
             className="p-3 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-lg transition flex items-center justify-between group"
           >
             <div>
-              <p className="text-xs font-bold text-slate-200 group-hover:text-cyan-400 transition">ECDC Outbreaks Today</p>
+              <p className="text-xs font-bold text-slate-200 group-hover:text-cyan-400 transition">ECDC Weekly Threats (CDTR)</p>
               <p className="text-[10px] text-slate-400 mt-0.5">European Centre disease surveillance</p>
             </div>
             <ExternalLink size={14} className="text-slate-500 group-hover:text-cyan-400 shrink-0" />
@@ -345,7 +380,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Grid: Global Ticker Feed & AI Logging Form */}
+      {/* Grid: Global Ticker Feed & Interactive AI Diagnostic Engine */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
         {/* Left: WHO Live Threat Feed */}
         <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 lg:col-span-1 flex flex-col">
@@ -363,8 +398,8 @@ export default function Home() {
           ) : alerts.length === 0 ? (
             <p className="text-xs text-slate-400">No active bulletins.</p>
           ) : (
-            <div className="space-y-3 overflow-y-auto max-h-[380px] pr-1">
-              {alerts.slice(0, 5).map((alert, idx) => (
+            <div className="space-y-3 overflow-y-auto max-h-[420px] pr-1">
+              {alerts.map((alert, idx) => (
                 <div key={idx} className="p-3 bg-slate-950/60 rounded-lg border border-slate-800/80">
                   <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest">{alert.source}</span>
                   <h4 className="text-xs font-semibold text-slate-200 mt-0.5 line-clamp-2">{alert.title}</h4>
@@ -377,33 +412,78 @@ export default function Home() {
           )}
         </div>
 
-        {/* Right: Interactive AI Pathogen Logger */}
+        {/* Right: Interactive AI Diagnostic Solution & Logging Form */}
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 lg:col-span-2">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-bold flex items-center gap-2">
-              <Sparkles size={20} className="text-cyan-400" /> Log Advanced Telemetry Event
+              <Stethoscope size={20} className="text-cyan-400" /> Clinical Diagnosis & Treatment Solution Engine
             </h2>
             <button
               type="button"
-              onClick={simulateAiAgent}
-              disabled={isAnalyzing}
-              className="flex items-center gap-1.5 bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800 text-xs font-semibold px-3 py-1.5 rounded-lg transition"
+              onClick={runDiagnosticEngine}
+              disabled={isDiagnosing}
+              className="flex items-center gap-1.5 bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800 text-xs font-semibold px-3.5 py-2 rounded-lg transition"
             >
-              <Sparkles size={14} /> {isAnalyzing ? 'Running AI Agent...' : 'Simulate AI Risk Analysis'}
+              <Sparkles size={14} /> {isDiagnosing ? 'Analyzing Symptoms...' : 'Generate Diagnosis & Solutions'}
             </button>
           </div>
 
-          {aiAnalysis && (
-            <div className="mb-4 p-3 bg-cyan-950/40 border border-cyan-800/60 rounded-lg text-xs text-cyan-200">
-              <p className="font-bold mb-1">🤖 Autonomous Agent Output:</p>
-              {aiAnalysis}
+          {/* Diagnostic Results Display Matrix */}
+          {diagnosisData && (
+            <div className="mb-6 p-4 bg-slate-950 border border-cyan-800/60 rounded-xl space-y-3 text-xs">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <span className="font-bold text-cyan-400 text-sm flex items-center gap-1.5">
+                  <CheckCircle2 size={16} /> Clinical Protocol Generated for [{diagnosisData.pathogen}]
+                </span>
+                <span className="text-[10px] bg-cyan-950 text-cyan-300 px-2 py-0.5 rounded border border-cyan-800 font-mono">
+                  AI Decision Support Active
+                </span>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="bg-slate-900 p-3 rounded-lg border border-slate-800">
+                  <p className="font-bold text-slate-200 mb-1">🔍 Differential Diagnoses:</p>
+                  <ul className="list-disc list-inside text-slate-300 space-y-0.5">
+                    {diagnosisData.clinical_assessment.differential_diagnosis.map((d, i) => (
+                      <li key={i}>{d}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="bg-slate-900 p-3 rounded-lg border border-slate-800">
+                  <p className="font-bold text-slate-200 mb-1">🧪 Confirmatory Tests:</p>
+                  <ul className="list-disc list-inside text-slate-300 space-y-0.5">
+                    {diagnosisData.clinical_assessment.confirmatory_tests.map((t, i) => (
+                      <li key={i}>{t}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="bg-slate-900 p-3 rounded-lg border border-slate-800">
+                  <p className="font-bold text-emerald-400 mb-1">💊 Therapeutics & Management:</p>
+                  <ul className="list-disc list-inside text-slate-300 space-y-0.5">
+                    {diagnosisData.clinical_assessment.therapeutics.map((th, i) => (
+                      <li key={i}>{th}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="bg-slate-900 p-3 rounded-lg border border-slate-800">
+                  <p className="font-bold text-orange-400 mb-1">🛡️ Containment & PPE Protocols:</p>
+                  <ul className="list-disc list-inside text-slate-300 space-y-0.5">
+                    {diagnosisData.clinical_assessment.containment_ppe.map((p, i) => (
+                      <li key={i}>{p}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
             </div>
           )}
 
           <form onSubmit={handleAddItem} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Pathogen / Strain</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Target Pathogen / Strain</label>
                 <select
                   value={pathogenName}
                   onChange={(e) => setPathogenName(e.target.value)}
@@ -411,10 +491,10 @@ export default function Home() {
                 >
                   <option value="Hantavirus (Sin Nombre)">Hantavirus (Sin Nombre)</option>
                   <option value="Hantavirus (Puumala)">Hantavirus (Puumala)</option>
-                  <option value="COVID-19 (SARS-CoV-2)">COVID-19 (SARS-CoV-2)</option>
-                  <option value="Avian Influenza (H5N1)">Avian Influenza (H5N1)</option>
                   <option value="Ebola Virus">Ebola Virus</option>
                   <option value="Marburg Virus">Marburg Virus</option>
+                  <option value="Avian Influenza (H5N1)">Avian Influenza (H5N1)</option>
+                  <option value="COVID-19 (SARS-CoV-2)">COVID-19 (SARS-CoV-2)</option>
                   <option value="Lassa Fever">Lassa Fever</option>
                   <option value="Other Emerging Pathogen">Other Emerging Pathogen</option>
                 </select>
@@ -489,11 +569,11 @@ export default function Home() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">Field Telemetry Notes</label>
+              <label className="block text-xs font-medium text-slate-300 mb-1">Field Telemetry & Clinical Notes</label>
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Enter clinical symptoms, soil/rodent trapping telemetry, or sample testing details..."
+                placeholder="Enter patient symptoms, rodent trapping results, or field sampling logs..."
                 className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-xs text-slate-100 focus:ring-2 focus:ring-cyan-500 h-20"
               />
             </div>
@@ -502,7 +582,7 @@ export default function Home() {
               type="submit"
               className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2.5 px-4 rounded-lg transition shadow-md shadow-cyan-950"
             >
-              Commit Telemetry to Database
+              Commit Telemetry & Diagnostic Solutions to Database
             </button>
           </form>
         </div>
